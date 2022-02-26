@@ -46,9 +46,13 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 	FileScan fc = FileScan(relationName,bufMgrIn);
 	RecordId rid;
 	try{
-		fc.scanNext(rid);
-		std::string data = fc.getRecord();
-		insertEntry(&data,rid);
+		while (true){
+			fc.scanNext(rid);
+			std::string data = fc.getRecord();
+			char* key;
+			strncpy(key,&data[attrByteOffset],sizeof(attrType));
+			insertEntry((void*)key,rid);
+		}
 	}catch(EndOfFileException &e){
 	}
 
