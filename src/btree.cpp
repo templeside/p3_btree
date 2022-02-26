@@ -31,7 +31,26 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		BufMgr *bufMgrIn,
 		const int attrByteOffset,
 		const Datatype attrType)
-{
+{	
+	std::ostringstream idxStr;
+	idxStr << relationName << '.' << attrByteOffset;
+	outIndexName = idxStr.str();
+	try{
+		BlobFile::exists(outIndexName);
+		BlobFile indexFile = BlobFile(outIndexName,false);
+		return;
+	}
+	catch (FileNotFoundException &e){
+	}
+	BlobFile indexFile = BlobFile(outIndexName,true);
+	FileScan fc = FileScan(relationName,bufMgrIn);
+	RecordId rid;
+	try{
+		fc.scanNext(rid);
+		std::string data = fc.getRecord();
+		insertEntry(&data,rid);
+	}catch(EndOfFileException &e){
+	}
 
 }
 
