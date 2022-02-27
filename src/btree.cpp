@@ -43,6 +43,16 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 	catch (FileNotFoundException &e){
 	}
 	BlobFile indexFile = BlobFile(outIndexName,true);
+
+	PageId pid;
+	Page cur_page;
+	Page *meta_page_raw=bufMgrIn->allocatePage(indexFile,pid,curPage);
+	IndexMetaInfo *index_meta = reinterpret_cast<IndexMetaInfo*>(&meta_page_new);
+	index_meta->relationName = relationName;
+	index_meta->attryByteOffset = attrByteOffset;
+	index_meta->attrType = attrType;
+	bufMgrIn->unPinPage(indexFile,pid,true);
+
 	FileScan fc = FileScan(relationName,bufMgrIn);
 	RecordId rid;
 	try{
@@ -50,7 +60,7 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 			fc.scanNext(rid);
 			std::string data = fc.getRecord();
 			char* key;
-			strncpy(key,&data[attrByteOffset],sizeof(attrType));
+			strncpy(key,&data[attrByteOffset],sizeof(int));
 			insertEntry((void*)key,rid);
 		}
 	}catch(EndOfFileException &e){
