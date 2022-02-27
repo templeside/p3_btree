@@ -15,6 +15,7 @@
 #include "exceptions/index_scan_completed_exception.h"
 #include "exceptions/file_not_found_exception.h"
 #include "exceptions/end_of_file_exception.h"
+#include <climits>
 
 
 //#define DEBUG
@@ -58,15 +59,25 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 	PageId rootid;
 	Page* root_page;
 	bufMgrIn->allocPage(&indexFile,rootid,root_page);
-	index_meta->rootPageNo = rootid;
+	NonLeafNodeInt* root_node=reinterpret_cast<NonLeafNodeInt*>(&root_page);
+	for(int i=0;i<INTARRAYNONLEAFSIZE;i++){
+		root_node->keyArray[i] = INT_MAX;
+		root_node->pageNoArray[i] = Page::INVALID_NUMBER;
+	}
+	root_node->level = 1;
+	
+
 
 	//fill in fields of btree
+	index_meta->rootPageNo = rootid;
 	this->file = &indexFile;
 	this->bufMgr = bufMgrIn;
 	this->headerPageNum = pid;
 	this->rootPageNum = rootid;
 	this->attributeType = attrType;
 	this->attrByteOffset = attrByteOffset;
+	this->leafOccupancy = INTARRAYLEAFSIZE;
+	this->nodeOccupancy = INTARRAYNONLEAFSIZE;
 
 	//unpin
 	bufMgrIn->unPinPage(&indexFile,pid,true);
@@ -79,9 +90,8 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		while (true){
 			fc.scanNext(rid);
 			std::string data = fc.getRecord();
-			char* key;
-			strncpy(key,&data[attrByteOffset],sizeof(int));
-			insertEntry((void*)key,rid);
+			int* key = reinterpret_cast<int*>(&data + attrByteOffset);
+			insertEntry(key,rid);
 		}
 	}catch(EndOfFileException &e){
 	}
