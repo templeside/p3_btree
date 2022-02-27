@@ -43,16 +43,36 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 	catch (FileNotFoundException &e){
 	}
 	BlobFile indexFile = BlobFile(outIndexName,true);
+	
 
+	//allocate meta page
 	PageId pid;
-	Page cur_page;
-	Page *meta_page_raw=bufMgrIn->allocatePage(indexFile,pid,curPage);
-	IndexMetaInfo *index_meta = reinterpret_cast<IndexMetaInfo*>(&meta_page_new);
-	index_meta->relationName = relationName;
-	index_meta->attryByteOffset = attrByteOffset;
+	Page* meta_page;
+	bufMgrIn->allocPage(&indexFile,pid,meta_page);
+	IndexMetaInfo* index_meta = reinterpret_cast<IndexMetaInfo*>(&meta_page);
+	strcpy(index_meta->relationName,relationName.c_str());
+	index_meta->attrByteOffset = attrByteOffset;
 	index_meta->attrType = attrType;
-	bufMgrIn->unPinPage(indexFile,pid,true);
+	
+	//allocate root page
+	PageId rootid;
+	Page* root_page;
+	bufMgrIn->allocPage(&indexFile,rootid,root_page);
+	index_meta->rootPageNo = rootid;
 
+	//fill in fields of btree
+	this->file = &indexFile;
+	this->bufMgr = bufMgrIn;
+	this->headerPageNum = pid;
+	this->rootPageNum = rootid;
+	this->attributeType = attrType;
+	this->attrByteOffset = attrByteOffset;
+
+	//unpin
+	bufMgrIn->unPinPage(&indexFile,pid,true);
+	bufMgrIn->unPinPage(&indexFile,rootid,true);
+
+	//insert entries from the relation
 	FileScan fc = FileScan(relationName,bufMgrIn);
 	RecordId rid;
 	try{
