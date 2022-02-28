@@ -155,6 +155,8 @@ struct NonLeafNodeInt{
    * Stores page numbers of child pages which themselves are other non-leaf/leaf nodes in the tree.
    */
 	PageId pageNoArray[ INTARRAYNONLEAFSIZE + 1 ];
+
+  int stored = 0; //number of keys stored
 };
 
 
@@ -177,6 +179,8 @@ struct LeafNodeInt{
 	 * This linking of leaves allows to easily move from one leaf to the next leaf during index scan.
    */
 	PageId rightSibPageNo;
+
+  int stored = 0;//number of keys stored
 };
 
 
