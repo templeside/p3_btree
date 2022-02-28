@@ -67,8 +67,6 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 	}
 	root_node->level = 1;
 	
-
-
 	//fill in fields of btree
 	index_meta->rootPageNo = rootid;
 	this->file = &indexFile;
@@ -117,18 +115,22 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 
 	int int_key = *(int*)key;
 	std::stack<NonLeafNodeInt*>stack;
+	std::stack<PageId>pid_stack;
 
 	Page* root_page;
 	bufMgr->readPage(file,rootPageNum,root_page);
 	NonLeafNodeInt* root_node = reinterpret_cast<NonLeafNodeInt*>(root_page);
 	NonLeafNodeInt* current = root_node;
+	PageId child_pid;
 	LeafNodeInt* leaf;
 	Page* child_page;
 	LeafNodeInt* child_node;
 
-	while(current->level!=1){
-		PageId child_pid;
-		stack.push(current);
+	stack.push(root_node);
+	pid_stack.push(rootPageNum);
+
+
+	while(current->level>=1){
 		int i;
 		//find the child node to proceed
 		for(i=0;i<nodeOccupancy;i++){
@@ -173,6 +175,8 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		else{
 			current = reinterpret_cast<NonLeafNodeInt*>(child_page);
 		}
+		stack.push(current);
+		pid_stack.push(child_pid);
 	}
 	//have the leaf page
 
@@ -198,32 +202,170 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		LeafNodeInt* new_leaf;
 		bufMgr->allocPage(file,new_pid,new_page);
 		new_leaf = reinterpret_cast<LeafNodeInt*>(new_page);
-		int half = (leafOccupancy+1)/2-1; //index of last element on the left
+
+		//copy everything to the new array, insert at the corresponding location
+		RIDKeyPair<int>* deepCopy[leafOccupancy+1];
+		for (int a=0;a<leafOccupancy;a++){
+			deepCopy[a] = new RIDKeyPair<int>;
+			deepCopy[a]->set(leaf->ridArray[a],leaf->keyArray[a]);
+		}
+
+		//insert the new key
 		int m = 0;
-		while(int_key>(leaf->keyArray[m])){
+		while(int_key>(deepCopy[m]->key)){
 			m++;
 		}
-		//copy everything to the new array, insert at the corresponding location
-		//scopy first half and second half to the two pages
-		//do copy up and the setting of rightsibling field correspondingly
-		RIDKeyPair* deepCopy[];
-		if(m<=half){
-			for(int n=half;n<leaf->stored;n++){
-				new_leaf->keyArray[n-half] = leaf->keyArray[n];
-				new_leaf->ridArray[n-half] = leaf->ridArray[n];
+		for(int b=leafOccupancy;b>m;b--){
+			deepCopy[b] = deepCopy[b-1];
+		}
+		deepCopy[m] = new RIDKeyPair<int>;
+		deepCopy[m]->set(rid,int_key);
+		int half = (leafOccupancy+1)/2;
+		//update the original child
+		for(int c=0;c<leafOccupancy;c++){
+			if(c<half){
+				leaf->keyArray[c] = deepCopy[c]->key;
+				leaf->ridArray[c] = deepCopy[c]->rid;
 			}
+			else{
+				leaf->keyArray[c] = INT_MAX;
+			}
+		}
+		
+		//update the new child
+		for (int c=0;c<leafOccupancy;c++){
+			if(c+half<leafOccupancy+1){
+				new_leaf->keyArray[c] = deepCopy[c+half]->key;
+				new_leaf->ridArray[c] = deepCopy[c+half]->rid;
+			}
+			else{
+				new_leaf->keyArray[c] = INT_MAX;
+			}
+		}
 
+		//set the fields correspondingly
+		new_leaf->rightSibPageNo = leaf->rightSibPageNo;
+		leaf->rightSibPageNo = new_pid;
+		leaf->stored = half;
+		new_leaf->stored = leafOccupancy+1-half;
+
+		//cleanup the new array created
+		for(int c=0;c<leafOccupancy+1;c++){
+			delete deepCopy[c];
+		}
+		delete deepCopy;
+
+		int copy_up = new_leaf->keyArray[0];
+
+		if(current->stored<nodeOccupancy){
+			int m = 0;
+			while(copy_up>(current->keyArray[m])){
+				m++;
+			}
+			for(int n=current->stored;n>m;n--){
+				current->keyArray[n] = current->keyArray[n-1];
+				current->pageNoArray[n] = current->pageNoArray[n-1];
+			}
+			current->keyArray[m] = int_key;
+			current->pageNoArray[m] = new_pid;
+			current->stored++;
+			bufMgr->unPinPage(file,child_pid,true);
+			bufMgr->unPinPage(file,new_pid,true);
+			//the direct parent is dirty
+			stack.pop();
+			PageId cur_pid = pid_stack.top();
+			pid_stack.pop();
+			bufMgr->unPinPage(file,cur_pid,true);
+			//the rest are not
+			while(!stack.empty()){
+				stack.pop();
+				cur_pid = pid_stack.top();
+				pid_stack.pop();
+				bufMgr->unPinPage(file,cur_pid,false);
+			}
+		}
+		else{
+			bufMgr->unPinPage(file,child_pid,true);
+			bufMgr->unPinPage(file,new_pid,true);			
+			while(current->stored==nodeOccupancy){
+				copy_up = parent_split(copy_up,current,new_pid);
+				current = stack.top();
+				stack.pop();
+			}
+		}
+
+	}
+
+}
+
+int BTreeIndex::parent_split(int key,NonLeafNodeInt* current,PageId child_pid){
+	PageId new_pid;
+	Page* new_page;
+	NonLeafNodeInt* new_nonleaf;
+	bufMgr->allocPage(file,new_pid,new_page);
+	new_nonleaf = reinterpret_cast<NonLeafNodeInt*>(new_page);
+
+	//copy everything to the new array, insert at the corresponding location
+	int keyCopy[nodeOccupancy+1];
+	PageId pNoCopy[nodeOccupancy+2];
+	int a=0;
+	for (;a<nodeOccupancy;a++){
+		keyCopy[a] = current->keyArray[a];
+		pNoCopy[a] = current->pageNoArray[a];
+	}
+	pNoCopy[a+1] = current->pageNoArray[a+1];
+
+	//insert the new key
+	int m = 0;
+	while(key>keyCopy[m]){
+		m++;
+	}
+	for(int b=nodeOccupancy;b>m;b--){
+		keyCopy[b] = keyCopy[b-1];
+	}
+	for(int b=nodeOccupancy+1;b>m+1;b--){
+		pNoCopy[b] = pNoCopy[b-1];
+	}
+	keyCopy[m] = key;
+	pNoCopy[m+1]=child_pid;
+
+	int half = (nodeOccupancy+1)/2;//the key to be push up
+	//update the original child
+	for(int c=0;c<nodeOccupancy;c++){
+		if(c<half){
+			current->keyArray[c] = keyCopy[c];
+			current->pageNoArray[c] = pNoCopy[c];
+		}
+		else{
+			current->keyArray[c] = INT_MAX;
 		}
 	}
 
 	
+	//update the new internal node
+	for (int c=0;c<nodeOccupancy;c++){
+		if(c+half+1<nodeOccupancy+1){
+			new_nonleaf->keyArray[c] = keyCopy[c+half+1];
+			new_nonleaf->pageNoArray[c] = pNoCopy[c+half+1];
+		}
+		else{
+			new_nonleaf->keyArray[c] = INT_MAX;
+		}
+	}
 
+	int push_up = keyCopy[half];
+	//set the fields correspondingly
+	current->stored = half;
+	new_nonleaf->stored = nodeOccupancy+1-half-1;
 
-
-//unpin eveything in the stack at the end
+	// //cleanup the new array created
+	// for(int c=0;c<leafOccupancy+1;c++){
+	// 	delete deepCopy[c];
+	// }
+	// delete deepCopy;
+	// int copy_up = new_leaf->keyArray[0];
+	return push_up;
 }
-
-//void BTreeIndex::split(int*key,const RecordId rid, )
 
 // -----------------------------------------------------------------------------
 // BTreeIndex::startScan
