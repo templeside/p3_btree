@@ -334,6 +334,8 @@ class BTreeIndex {
 	void insertEntry(const void* key, const RecordId rid);
 
 
+  int parent_split(int key,NonLeafNodeInt* current,PageId new_pid);
+
   /**
 	 * Begin a filtered scan of the index.  For instance, if the method is called 
 	 * using ("a",GT,"d",LTE) then we should seek all entries with a value 
