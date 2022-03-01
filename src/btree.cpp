@@ -251,12 +251,12 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 			delete deepCopy[c];
 		}
 
+		int copy_up = new_leaf->keyArray[0];
+
 		//clean up the two leaf pages
 		bufMgr->unPinPage(file,child_pid,true);
 		bufMgr->unPinPage(file,new_pid,true);
 
-
-		int copy_up = new_leaf->keyArray[0];
 		insert_internal(copy_up,new_pid);
 
 	}
@@ -271,9 +271,9 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 		while(key>(parent->keyArray[m])){
 			m++;
 		}
-		int n=parent->stored;
+		int n;
 		
-		for(;n>m;n--){
+		for(n=parent->stored;n>m;n--){
 			parent->keyArray[n] = parent->keyArray[n-1];
 			parent->pageNoArray[n+1] = parent->pageNoArray[n];
 		}
@@ -304,7 +304,8 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 			keyCopy[a] = parent->keyArray[a];
 			pNoCopy[a] = parent->pageNoArray[a];
 		}
-		pNoCopy[a+1] = parent->pageNoArray[a+1];
+		pNoCopy[a] = parent->pageNoArray[a];
+
 		//insert the new key
 		int m = 0;
 		while(key>keyCopy[m]){
@@ -317,7 +318,7 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 		keyCopy[m] = key;
 		pNoCopy[m+1]=new_child_pid;	
 
-		int half = (nodeOccupancy+1)/2;//the key to be push up
+		int half = nodeOccupancy/2;//the key to be push up
 		//update the original child
 		for(int c=0;c<nodeOccupancy;c++){
 			if(c<half){
@@ -333,7 +334,6 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 		}
 		parent->stored = half;
 		
-
 		//update the new internal node
 		for (int c=0;c<nodeOccupancy;c++){
 			if(c+half+1<nodeOccupancy+1){
