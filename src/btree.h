@@ -17,6 +17,8 @@
 #include "file.h"
 #include "buffer.h"
 
+#include <stack>
+
 namespace badgerdb
 {
 
@@ -295,6 +297,10 @@ class BTreeIndex {
    */
 	Operator	highOp;
 
+  int height;
+  std::stack<NonLeafNodeInt*> node_stack;
+  std::stack<PageId> pid_stack;
+
 	
  public:
 
@@ -334,7 +340,7 @@ class BTreeIndex {
 	void insertEntry(const void* key, const RecordId rid);
 
 
-  int parent_split(int key,NonLeafNodeInt* current,PageId new_pid);
+  void insert_internal(int key, PageId new_child_pid);
 
   /**
 	 * Begin a filtered scan of the index.  For instance, if the method is called 

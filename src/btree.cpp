@@ -66,6 +66,16 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		root_node->pageNoArray[i] = Page::INVALID_NUMBER;
 	}
 	root_node->level = 1;
+
+	// allocate the first leaf page
+	PageId childid;
+	Page* child_page;
+	bufMgrIn->allocPage(&indexFile, childid, child_page);
+	LeafNodeInt* child_node = reinterpret_cast<LeafNodeInt*>(child_page);
+	child_node->rightSibPageNo = -1;
+	for(int i = 0; i < leafOccupancy; i++){
+		child_node->keyArray[i] = INT_MAX;
+	}
 	
 	//fill in fields of btree
 	index_meta->rootPageNo = rootid;
@@ -77,10 +87,12 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 	this->attrByteOffset = attrByteOffset;
 	this->leafOccupancy = INTARRAYLEAFSIZE;
 	this->nodeOccupancy = INTARRAYNONLEAFSIZE;
+	this->height = 2;
 
 	//unpin
 	bufMgrIn->unPinPage(&indexFile,pid,true);
 	bufMgrIn->unPinPage(&indexFile,rootid,true);
+	bufMgrIn->unPinPage(&indexFile,childid,true);
 
 	//insert entries from the relation
 	FileScan fc = FileScan(relationName,bufMgrIn);
@@ -114,8 +126,8 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 {
 
 	int int_key = *(int*)key;
-	std::stack<NonLeafNodeInt*>stack;
-	std::stack<PageId>pid_stack;
+	// std::stack<NonLeafNodeInt*>stack;
+	// std::stack<PageId>pid_stack;
 
 	Page* root_page;
 	bufMgr->readPage(file,rootPageNum,root_page);
@@ -126,7 +138,7 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 	Page* child_page;
 	LeafNodeInt* child_node;
 
-	stack.push(root_node);
+	node_stack.push(root_node);
 	pid_stack.push(rootPageNum);
 
 
@@ -143,30 +155,10 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 				child_pid = root_node->pageNoArray[i];
 			}
 		}
-		//place 1 to exit while loop
-		if (child_pid==Page::INVALID_NUMBER){
-			bufMgr->allocPage(file,child_pid,child_page);
-			leaf = reinterpret_cast<LeafNodeInt*>(child_page);
-			for(int j=0;j<leafOccupancy;j++){
-				leaf->keyArray[j] = INT_MAX;
-			}
-			current->pageNoArray[i] = child_pid;
-			//set the right sibling pageid for its left sibling
-			//the condition may need revision???
-			if((i!=0) ||(current!=root_node)){
-				PageId left_pid = current->pageNoArray[i-1];
-				Page* left_page;
-				bufMgr->readPage(file,left_pid,left_page);
-				LeafNodeInt* left_node = reinterpret_cast<LeafNodeInt*>(left_page);
-				left_node->rightSibPageNo = child_pid;
-				bufMgr->unPinPage(file,left_pid,true);
-			}
-			break;
-		}
 
 		bufMgr->readPage(file,child_pid,child_page);
 
-		//place 2 to exit while loop
+		//only place to exit while loop
 		if(current->level==1){
 			leaf = reinterpret_cast<LeafNodeInt*>(child_page);
 			break;
@@ -175,7 +167,7 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		else{
 			current = reinterpret_cast<NonLeafNodeInt*>(child_page);
 		}
-		stack.push(current);
+		node_stack.push(current);
 		pid_stack.push(child_pid);
 	}
 	//have the leaf page
@@ -193,7 +185,13 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		leaf->keyArray[m] = int_key;
 		leaf->ridArray[m] = rid;
 		leaf->stored++;
-		//TODO: clean up
+		//clean up
+		bufMgr->unPinPage(file,child_pid,true);
+		while(!node_stack.empty()){
+			bufMgr->unPinPage(file,pid_stack.top(),false);
+			node_stack.pop();
+			pid_stack.pop();
+		}
 	}
 	//leaf does not have enough space
 	else{
@@ -221,6 +219,7 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		deepCopy[m] = new RIDKeyPair<int>;
 		deepCopy[m]->set(rid,int_key);
 		int half = (leafOccupancy+1)/2;
+
 		//update the original child
 		for(int c=0;c<leafOccupancy;c++){
 			if(c<half){
@@ -255,117 +254,152 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		}
 		delete deepCopy;
 
+		//clean up the two leaf pages
+		bufMgr->unPinPage(file,child_pid,true);
+		bufMgr->unPinPage(file,new_pid,true);
+
+
 		int copy_up = new_leaf->keyArray[0];
+		insert_internal(copy_up,new_pid);
 
-		if(current->stored<nodeOccupancy){
-			int m = 0;
-			while(copy_up>(current->keyArray[m])){
-				m++;
-			}
-			for(int n=current->stored;n>m;n--){
-				current->keyArray[n] = current->keyArray[n-1];
-				current->pageNoArray[n] = current->pageNoArray[n-1];
-			}
-			current->keyArray[m] = int_key;
-			current->pageNoArray[m] = new_pid;
-			current->stored++;
-			bufMgr->unPinPage(file,child_pid,true);
-			bufMgr->unPinPage(file,new_pid,true);
-			//the direct parent is dirty
-			stack.pop();
-			PageId cur_pid = pid_stack.top();
+	}
+
+	//stack clean up and unpin
+
+}
+
+void BTreeIndex::insert_internal(int key,PageId new_child_pid){
+	NonLeafNodeInt* parent = node_stack.top();
+	PageId parent_pid = pid_stack.top();
+	if(parent->stored<nodeOccupancy){
+		int m = 0;
+		while(key>(parent->keyArray[m])){
+			m++;
+		}
+		int n=parent->stored;
+		
+		for(;n>m;n--){
+			parent->keyArray[n] = parent->keyArray[n-1];
+			parent->pageNoArray[n+1] = parent->pageNoArray[n];
+		}
+		parent->keyArray[m] = key;
+		parent->pageNoArray[m+1] = new_child_pid;
+		parent->stored++;
+		//clean up
+		bufMgr->unPinPage(file,parent_pid,true);
+		while(!node_stack.empty()){
+			bufMgr->unPinPage(file,pid_stack.top(),false);
+			node_stack.pop();
 			pid_stack.pop();
-			bufMgr->unPinPage(file,cur_pid,true);
-			//the rest are not
-			while(!stack.empty()){
-				stack.pop();
-				cur_pid = pid_stack.top();
-				pid_stack.pop();
-				bufMgr->unPinPage(file,cur_pid,false);
+		}
+		return;
+	}
+	else{
+		PageId new_pid;
+		Page* new_page;
+		NonLeafNodeInt* new_nonleaf;
+		bufMgr->allocPage(file,new_pid,new_page);
+		new_nonleaf = reinterpret_cast<NonLeafNodeInt*>(new_page);
+
+		//copy everything to the new array, insert at the corresponding location
+		int keyCopy[nodeOccupancy+1];
+		PageId pNoCopy[nodeOccupancy+2];
+		int a;
+		for(a=0;a<nodeOccupancy;a++){
+			keyCopy[a] = parent->keyArray[a];
+			pNoCopy[a] = parent->pageNoArray[a];
+		}
+		pNoCopy[a+1] = parent->pageNoArray[a+1];
+		//insert the new key
+		int m = 0;
+		while(key>keyCopy[m]){
+			m++;
+		}
+		for(int b=nodeOccupancy;b>m;b--){
+			keyCopy[b] = keyCopy[b-1];
+			pNoCopy[b+1] = pNoCopy[b];
+		}
+		keyCopy[m] = key;
+		pNoCopy[m+1]=new_child_pid;	
+
+		int half = (nodeOccupancy+1)/2;//the key to be push up
+		//update the original child
+		for(int c=0;c<nodeOccupancy;c++){
+			if(c<half){
+				parent->keyArray[c] = keyCopy[c];
+				parent->pageNoArray[c] = pNoCopy[c];
+			}
+			else{
+				parent->keyArray[c] = INT_MAX;
+				if(c==half){
+					parent->pageNoArray[c] = pNoCopy[c];
+				}
 			}
 		}
-		else{
-			bufMgr->unPinPage(file,child_pid,true);
-			bufMgr->unPinPage(file,new_pid,true);			
-			while(current->stored==nodeOccupancy){
-				copy_up = parent_split(copy_up,current,new_pid);
-				current = stack.top();
-				stack.pop();
+		parent->stored = half;
+		
+
+		//update the new internal node
+		for (int c=0;c<nodeOccupancy;c++){
+			if(c+half+1<nodeOccupancy+1){
+				new_nonleaf->keyArray[c] = keyCopy[c+half+1];
+				new_nonleaf->pageNoArray[c] = pNoCopy[c+half+1];
 			}
+			else{
+				new_nonleaf->keyArray[c] = INT_MAX;
+				if(c+half+1==nodeOccupancy+1){
+					new_nonleaf->pageNoArray[c] = pNoCopy[c+half+1];
+				}
+			}
+		}
+		new_nonleaf->level = parent->level;
+		new_nonleaf->stored = nodeOccupancy-half;
+
+		//check root or not
+		int push_up = keyCopy[half];
+
+		//free the two copies
+
+		if(parent_pid==rootPageNum){
+			PageId new_root_pid;
+			Page* new_root_page;
+			NonLeafNodeInt* new_root;
+			bufMgr->allocPage(file,new_root_pid,new_root_page);
+			new_root = reinterpret_cast<NonLeafNodeInt*>(new_root_page);
+
+			new_root->keyArray[0] = push_up;
+			new_root->pageNoArray[0] = parent_pid;
+			new_root->pageNoArray[1] = new_pid;
+			for(int a=1;a<nodeOccupancy;a++){
+				new_root->keyArray[a] = INT_MAX;
+				new_root->pageNoArray[a+1] = Page::INVALID_NUMBER;
+			}
+			new_root->level = parent->level+1;
+			new_root->stored = 1;
+
+
+			this->height++;
+			this->rootPageNum = new_root_pid;
+			//update meta page root page number; how to access???
+			bufMgr->unPinPage(file,parent_pid,true);
+			bufMgr->unPinPage(file,new_pid,true);
+			bufMgr->unPinPage(file,new_root_pid,true);
+			return;
+		}
+		else{
+			//clean up and update next insert's parent before calling itself
+			bufMgr->unPinPage(file,parent_pid,true);
+			bufMgr->unPinPage(file,new_pid,true);
+			node_stack.pop();
+			pid_stack.pop();
+			insert_internal(push_up,new_pid);
 		}
 
 	}
 
 }
 
-int BTreeIndex::parent_split(int key,NonLeafNodeInt* current,PageId child_pid){
-	PageId new_pid;
-	Page* new_page;
-	NonLeafNodeInt* new_nonleaf;
-	bufMgr->allocPage(file,new_pid,new_page);
-	new_nonleaf = reinterpret_cast<NonLeafNodeInt*>(new_page);
 
-	//copy everything to the new array, insert at the corresponding location
-	int keyCopy[nodeOccupancy+1];
-	PageId pNoCopy[nodeOccupancy+2];
-	int a=0;
-	for (;a<nodeOccupancy;a++){
-		keyCopy[a] = current->keyArray[a];
-		pNoCopy[a] = current->pageNoArray[a];
-	}
-	pNoCopy[a+1] = current->pageNoArray[a+1];
-
-	//insert the new key
-	int m = 0;
-	while(key>keyCopy[m]){
-		m++;
-	}
-	for(int b=nodeOccupancy;b>m;b--){
-		keyCopy[b] = keyCopy[b-1];
-	}
-	for(int b=nodeOccupancy+1;b>m+1;b--){
-		pNoCopy[b] = pNoCopy[b-1];
-	}
-	keyCopy[m] = key;
-	pNoCopy[m+1]=child_pid;
-
-	int half = (nodeOccupancy+1)/2;//the key to be push up
-	//update the original child
-	for(int c=0;c<nodeOccupancy;c++){
-		if(c<half){
-			current->keyArray[c] = keyCopy[c];
-			current->pageNoArray[c] = pNoCopy[c];
-		}
-		else{
-			current->keyArray[c] = INT_MAX;
-		}
-	}
-
-	
-	//update the new internal node
-	for (int c=0;c<nodeOccupancy;c++){
-		if(c+half+1<nodeOccupancy+1){
-			new_nonleaf->keyArray[c] = keyCopy[c+half+1];
-			new_nonleaf->pageNoArray[c] = pNoCopy[c+half+1];
-		}
-		else{
-			new_nonleaf->keyArray[c] = INT_MAX;
-		}
-	}
-
-	int push_up = keyCopy[half];
-	//set the fields correspondingly
-	current->stored = half;
-	new_nonleaf->stored = nodeOccupancy+1-half-1;
-
-	// //cleanup the new array created
-	// for(int c=0;c<leafOccupancy+1;c++){
-	// 	delete deepCopy[c];
-	// }
-	// delete deepCopy;
-	// int copy_up = new_leaf->keyArray[0];
-	return push_up;
-}
 
 // -----------------------------------------------------------------------------
 // BTreeIndex::startScan
