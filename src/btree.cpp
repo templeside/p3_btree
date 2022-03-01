@@ -126,17 +126,14 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 {
 
 	int int_key = *(int*)key;
-	// std::stack<NonLeafNodeInt*>stack;
-	// std::stack<PageId>pid_stack;
-
 	Page* root_page;
 	bufMgr->readPage(file,rootPageNum,root_page);
 	NonLeafNodeInt* root_node = reinterpret_cast<NonLeafNodeInt*>(root_page);
-	NonLeafNodeInt* current = root_node;
+	
+	NonLeafNodeInt* current = root_node; //pointer to the current internal node looking at
 	PageId child_pid;
 	LeafNodeInt* leaf;
 	Page* child_page;
-	LeafNodeInt* child_node;
 
 	node_stack.push(root_node);
 	pid_stack.push(rootPageNum);
@@ -170,7 +167,7 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		node_stack.push(current);
 		pid_stack.push(child_pid);
 	}
-	//have the leaf page
+	//found the leaf page to insert
 
 	//leaf has enough space
 	if(leaf->stored<leafOccupancy){
@@ -193,6 +190,7 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 			pid_stack.pop();
 		}
 	}
+
 	//leaf does not have enough space
 	else{
 		PageId new_pid;
@@ -252,7 +250,6 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		for(int c=0;c<leafOccupancy+1;c++){
 			delete deepCopy[c];
 		}
-		delete deepCopy;
 
 		//clean up the two leaf pages
 		bufMgr->unPinPage(file,child_pid,true);
@@ -263,8 +260,6 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		insert_internal(copy_up,new_pid);
 
 	}
-
-	//stack clean up and unpin
 
 }
 
@@ -358,8 +353,6 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 		//check root or not
 		int push_up = keyCopy[half];
 
-		//free the two copies
-
 		if(parent_pid==rootPageNum){
 			PageId new_root_pid;
 			Page* new_root_page;
@@ -380,10 +373,19 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 
 			this->height++;
 			this->rootPageNum = new_root_pid;
-			//update meta page root page number; how to access???
+
+			//update the metapage
+			PageId pid;
+			Page* meta_page;
+			bufMgr->readPage(file,pid,meta_page);
+			IndexMetaInfo* index_meta = reinterpret_cast<IndexMetaInfo*>(meta_page);
+			index_meta->rootPageNo = new_root_pid;
+
+			//unpin
 			bufMgr->unPinPage(file,parent_pid,true);
 			bufMgr->unPinPage(file,new_pid,true);
 			bufMgr->unPinPage(file,new_root_pid,true);
+			bufMgr->unPinPage(file,pid,true);
 			return;
 		}
 		else{
