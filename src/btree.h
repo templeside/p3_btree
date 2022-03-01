@@ -158,7 +158,10 @@ struct NonLeafNodeInt{
    */
 	PageId pageNoArray[ INTARRAYNONLEAFSIZE + 1 ];
 
-  int stored = 0; //number of keys stored
+  /**
+   * stores the number of keys currently in this node
+   */
+  int stored = 0; 
 };
 
 
@@ -182,7 +185,10 @@ struct LeafNodeInt{
    */
 	PageId rightSibPageNo;
 
-  int stored = 0;//number of keys stored
+  /**
+   * stores the number of keys currently in this leaf
+   */
+  int stored = 0;
 };
 
 
@@ -297,8 +303,18 @@ class BTreeIndex {
    */
 	Operator	highOp;
 
-  int height;
+  /**
+   * stores the height of the tree
+   */
+  int height; 
+  /**
+   * stores parent nodes when traversing the tree during insert
+   */
   std::stack<NonLeafNodeInt*> node_stack;
+  /**
+   * stores parent nodes pid when traversing the tree during insert
+   * used for unpinning
+   */
   std::stack<PageId> pid_stack;
 
 	

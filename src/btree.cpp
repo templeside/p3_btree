@@ -318,7 +318,7 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 		keyCopy[m] = key;
 		pNoCopy[m+1]=new_child_pid;	
 
-		int half = nodeOccupancy/2;//the key to be push up
+		int half = nodeOccupancy/2;//the index of the key to by pushed up later
 		//update the original child
 		for(int c=0;c<nodeOccupancy;c++){
 			if(c<half){
@@ -350,9 +350,10 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 		new_nonleaf->level = parent->level;
 		new_nonleaf->stored = nodeOccupancy-half;
 
-		//check root or not
-		int push_up = keyCopy[half];
+		
+		int push_up = keyCopy[half]; //the key to be pushed up
 
+		//check root or not
 		if(parent_pid==rootPageNum){
 			PageId new_root_pid;
 			Page* new_root_page;
