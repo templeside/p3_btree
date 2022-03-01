@@ -413,7 +413,94 @@ void BTreeIndex::startScan(const void* lowValParm,
 				   const void* highValParm,
 				   const Operator highOpParm)
 {
+    if (scanExecuting == true) {
+      endScan();
+    }
+	scanExecuting = true;
 
+    this -> lowValInt = *((int*) lowValParm);
+    this -> highValInt = *((int*) highValParm);
+    this -> lowOp = lowOpParm;
+    this -> highOp = highOpParm;
+
+    // BadOpcodesException 
+    if ((this -> lowOp != GT && this -> lowOp != GTE) || (this -> highOp != LT && this -> highOp != LTE)) {
+      throw BadOpcodesException();
+    }
+    // BadScanrangeException 
+    if (this -> lowValInt > this -> highValInt) {
+      throw BadScanrangeException();
+    }
+
+    currentPageNum = rootPageNum;
+
+    std::stack <PageId> stack;
+    stack.push(rootPageNum);
+
+    bufMgr -> readPage(file, rootPageNum, currentPageData); // read root page
+    NonLeafNodeInt* current = reinterpret_cast < NonLeafNodeInt * > (currentPageData);
+
+    LeafNodeInt* leaf;
+
+    while (current -> level != 1) {
+      for (int i = 0; i < nodeOccupancy; i++) {
+        if (lowValInt < current -> keyArray[i]) {
+          currentPageNum = current -> pageNoArray[i];
+          stack.push(currentPageNum);
+          bufMgr -> readPage(file, currentPageNum, currentPageData); // read next page
+          current = reinterpret_cast <NonLeafNodeInt*> (currentPageData);
+          break;
+        }
+        if (i == nodeOccupancy - 1) { // go to the last pageId
+          currentPageNum = current -> pageNoArray[i + 1];
+          stack.push(currentPageNum);
+          bufMgr -> readPage(file, currentPageNum, currentPageData); // read next page
+          current = reinterpret_cast <NonLeafNodeInt*> (currentPageData);
+        }
+      }
+    }
+
+    // unpin pages
+    while (!stack.empty()) {
+      bufMgr -> unPinPage(file, stack.top(), false);
+      stack.pop();
+    }
+
+    for (int i = 0; i < nodeOccupancy; i++) {
+      if (lowValInt < current -> keyArray[i]) {
+        currentPageNum = current -> pageNoArray[i];
+        bufMgr -> readPage(file, currentPageNum, currentPageData); // read next page
+        leaf = reinterpret_cast <LeafNodeInt*> (currentPageData);
+        break;
+      }
+      if (i == nodeOccupancy - 1) { // go to the last pageId
+        currentPageNum = current -> pageNoArray[i + 1];
+        bufMgr -> readPage(file, currentPageNum, currentPageData); // read next page
+        leaf = reinterpret_cast <LeafNodeInt*> (currentPageData);
+      }
+    }
+
+    nextEntry = 0;
+    bool key_found = false;
+
+    while (!key_found) {
+      if ((lowOp == GT && leaf -> keyArray[nextEntry] > lowValInt) || (lowOp == GTE && leaf -> keyArray[nextEntry] >= lowValInt)) {
+        key_found = true;
+      }
+      nextEntry += 1;
+      if (nextEntry == leafOccupancy) {
+        PageId prev = currentPageNum;
+        if ((int) leaf -> rightSibPageNo == -1) { // how to check whether a pageId is valid?
+          throw NoSuchKeyFoundException();
+        }
+        currentPageNum = leaf -> rightSibPageNo;
+        bufMgr -> unPinPage(file, prev, false); 
+        bufMgr -> readPage(file, currentPageNum, currentPageData); // read next page
+        leaf = reinterpret_cast <LeafNodeInt*> (currentPageData);
+        nextEntry = 0;
+      }
+    }
+	// bufMgr -> unPinPage(file, currentPageNum, true); 
 }
 
 // -----------------------------------------------------------------------------
@@ -422,7 +509,28 @@ void BTreeIndex::startScan(const void* lowValParm,
 
 void BTreeIndex::scanNext(RecordId& outRid) 
 {
-
+if (!scanExecuting) { 
+		throw ScanNotInitializedException(); 
+	}
+	bufMgr->readPage(file, currentPageNum, currentPageData);
+	LeafNodeInt* leaf = reinterpret_cast<LeafNodeInt*> (currentPageData);
+	if ((highOp == LTE && leaf->keyArray[nextEntry] > highValInt) || (highOp == LT && leaf->keyArray[nextEntry] >= highValInt)) {
+		throw IndexScanCompletedException();
+	} else {
+		outRid = leaf->ridArray[nextEntry];
+		nextEntry += 1;
+		if (nextEntry == leafOccupancy) {
+			if ((int)leaf->rightSibPageNo == -1) {
+				throw IndexScanCompletedException();
+			} else {
+				PageId prev = currentPageNum;
+				currentPageNum = leaf -> rightSibPageNo;
+				bufMgr -> unPinPage(file, prev, false); 
+        		bufMgr -> readPage(file, currentPageNum, currentPageData); // read next page
+				nextEntry = 0;
+				}
+		}
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -431,7 +539,14 @@ void BTreeIndex::scanNext(RecordId& outRid)
 //
 void BTreeIndex::endScan() 
 {
-
+if (!scanExecuting) { 
+		throw ScanNotInitializedException(); 
+	} 
+	scanExecuting = false;
+	bufMgr->unPinPage(file, currentPageNum, false);
+	currentPageData = nullptr;
+	currentPageNum = static_cast<PageId>(-1);
+  	nextEntry = -1;
 }
 
 }
