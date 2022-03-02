@@ -42,6 +42,7 @@ using namespace badgerdb;
 const std::string relationName = "relA";
 //If the relation size is changed then the second parameter 2 chechPassFail may need to be changed to number of record that are expected to be found during the scan, else tests will erroneously be reported to have failed.
 const int	relationSize = 5000;
+const int 	stressSize = 30000;			//group added
 std::string intIndexName, doubleIndexName, stringIndexName;
 
 // This is the structure for tuples in the base relation
@@ -60,7 +61,7 @@ std::string dbRecord1;
 BufMgr * bufMgr = new BufMgr(100);
 
 // -----------------------------------------------------------------------------
-// Forward declarations
+// Forward declarationsz
 // -----------------------------------------------------------------------------
 
 void createRelationForward();
@@ -74,6 +75,17 @@ void test2();
 void test3();
 void errorTests();
 void deleteRelation();
+
+// added tests
+void test4_stress_contiguous_ascending();
+void test5_stress_contiguous_descending();
+void test6_stress_contiguous_random();
+void test7_out_of_bound();
+
+void contiguous_createRelationForward();	// 4
+void contiguous_createRelationBackward();	// 5
+void contiguous_createRelationRandom();		// 6
+void test_out_of_bound();					//7
 
 int main(int argc, char **argv)
 {
@@ -178,6 +190,218 @@ void test3()
 }
 
 // -----------------------------------------------------------------------------
+// extra Test(group added)
+// -----------------------------------------------------------------------------
+void test4_stress_contiguous_ascending() {
+  std::cout << "---------------------" << std::endl;
+  std::cout << "test4_stress_contiguous_ascending" << std::endl;
+  contiguous_createRelationForward();
+  intTests();
+  deleteRelation();
+}
+
+void test5_stress_contiguous_descending() {
+	std::cout << "---------------------" << std::endl;
+	std::cout << "test5_stress_contiguous_descending" << std::endl;
+	contiguous_createRelationBackward();
+	intTests();
+	deleteRelation();
+}
+void test6_stress_contiguous_random() {
+  std::cout << "---------------------" << std::endl;
+  std::cout << "test6_stress_contiguous_random" << std::endl;
+  contiguous_createRelationRandom();
+  intTests();
+  deleteRelation();
+}
+
+void test7_out_of_bound() {
+  std::cout << "---------------------" << std::endl;
+  std::cout << "test7_out_of_bound" << std::endl;
+  createRelationRandom();
+  test_out_of_bound();
+  deleteRelation();
+}
+
+// -----------------------------------------------------------------------------
+// user test helpers(group added)
+// -----------------------------------------------------------------------------
+void test_out_of_bound() 
+{
+	// destroy any old copies of relation file
+	try
+	{
+		File::remove(relationName);
+	}
+	catch(const FileNotFoundException &e)
+	{
+	}
+	std::cout << "Create a B+ Tree index on the integer field" << std::endl;
+	BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple, i),
+					INTEGER);
+
+	checkPassFail(intScan(&index, 3000, GTE, 6000, LT), 2000);
+	checkPassFail(intScan(&index, 4999, GTE, 5010, LT), 1);
+
+	checkPassFail(intScan(&index, 5500, GTE, 6000, LT), 0);
+	checkPassFail(intScan(&index, 4999, GT, 6000, LT), 0);
+	checkPassFail(intScan(&index, -3000, GT, 0, LT), 0);
+
+	checkPassFail(intScan(&index, -3000, GT, 0, LTE), 1);
+	checkPassFail(intScan(&index, -3000, GT, 5, LTE), 6);
+	checkPassFail(intScan(&index, -3000, GT, 200, LT), 200);
+}
+void contiguous_createRelationForward()
+{
+	std::vector<RecordId> ridVec;
+  // destroy any old copies of relation file
+	try
+	{
+		File::remove(relationName);
+	}
+	catch(const FileNotFoundException &e)
+	{
+	}
+
+  file1 = new PageFile(relationName, true);
+
+  // initialize all of record1.s to keep purify happy
+  memset(record1.s, ' ', sizeof(record1.s));
+	PageId new_page_number;
+  Page new_page = file1->allocatePage(new_page_number);
+
+  // Insert a bunch of tuples into the relation.
+  for(int i = 0; i < stressSize; i++ )
+	{
+    sprintf(record1.s, "%05d string record", i);
+    record1.i = i;
+    record1.d = (double)i;
+    std::string new_data(reinterpret_cast<char*>(&record1), sizeof(record1));
+
+		while(1)
+		{
+			try
+			{
+    		new_page.insertRecord(new_data);
+				break;
+			}
+			catch(const InsufficientSpaceException &e)
+			{
+				file1->writePage(new_page_number, new_page);
+  			new_page = file1->allocatePage(new_page_number);
+			}
+		}
+  }
+
+	file1->writePage(new_page_number, new_page);
+}
+void contiguous_createRelationBackward()
+{
+	  // destroy any old copies of relation file
+	try
+	{
+		File::remove(relationName);
+	}
+	catch(const FileNotFoundException &e)
+	{
+	}
+  file1 = new PageFile(relationName, true);
+
+  // initialize all of record1.s to keep purify happy
+  memset(record1.s, ' ', sizeof(record1.s));
+	PageId new_page_number;
+  Page new_page = file1->allocatePage(new_page_number);
+
+  // Insert a bunch of tuples into the relation.
+  for(int i = stressSize - 1; i >= 0; i-- )
+	{
+    sprintf(record1.s, "%05d string record", i);
+    record1.i = i;
+    record1.d = i;
+
+    std::string new_data(reinterpret_cast<char*>(&record1), sizeof(RECORD));
+
+		while(1)
+		{
+			try
+			{
+    		new_page.insertRecord(new_data);
+				break;
+			}
+			catch(const InsufficientSpaceException &e)
+			{
+				file1->writePage(new_page_number, new_page);
+  			new_page = file1->allocatePage(new_page_number);
+			}
+		}
+  }
+
+	file1->writePage(new_page_number, new_page);
+
+}
+void contiguous_createRelationRandom()
+{ 
+	  // destroy any old copies of relation file
+	try
+	{
+		File::remove(relationName);
+	}
+	catch(const FileNotFoundException &e)
+	{
+	}
+  file1 = new PageFile(relationName, true);
+
+  // initialize all of record1.s to keep purify happy
+  memset(record1.s, ' ', sizeof(record1.s));
+	PageId new_page_number;
+  Page new_page = file1->allocatePage(new_page_number);
+
+  // insert records in random order
+
+  std::vector<int> intvec(stressSize);
+  for( int i = 0; i < stressSize; i++ )
+  {
+    intvec[i] = i;
+  }
+
+  long pos;
+  int val;
+	int i = 0;
+  while( i < stressSize )
+  {
+    pos = random() % (stressSize-i);
+    val = intvec[pos];
+    sprintf(record1.s, "%05d string record", val);
+    record1.i = val;
+    record1.d = val;
+
+    std::string new_data(reinterpret_cast<char*>(&record1), sizeof(RECORD));
+
+		while(1)
+		{
+			try
+			{
+    		new_page.insertRecord(new_data);
+				break;
+			}
+			catch(const InsufficientSpaceException &e)
+			{
+      	file1->writePage(new_page_number, new_page);
+  			new_page = file1->allocatePage(new_page_number);
+			}
+		}
+
+		int temp = intvec[stressSize-1-i];
+		intvec[stressSize-1-i] = intvec[pos];
+		intvec[pos] = temp;
+		i++;
+  }
+  
+	file1->writePage(new_page_number, new_page);
+
+}
+
+// -----------------------------------------------------------------------------
 // createRelationForward
 // -----------------------------------------------------------------------------
 
@@ -229,7 +453,6 @@ void createRelationForward()
 // -----------------------------------------------------------------------------
 // createRelationBackward
 // -----------------------------------------------------------------------------
-
 void createRelationBackward()
 {
   // destroy any old copies of relation file
@@ -277,7 +500,6 @@ void createRelationBackward()
 // -----------------------------------------------------------------------------
 // createRelationRandom
 // -----------------------------------------------------------------------------
-
 void createRelationRandom()
 {
   // destroy any old copies of relation file
@@ -297,8 +519,8 @@ void createRelationRandom()
 
   // insert records in random order
 
-  std::vector<int> intvec(relationSize);
-  for( int i = 0; i < relationSize; i++ )
+  std::vector<int> intvec(stressSize);
+  for( int i = 0; i < stressSize; i++ )
   {
     intvec[i] = i;
   }
@@ -306,9 +528,9 @@ void createRelationRandom()
   long pos;
   int val;
 	int i = 0;
-  while( i < relationSize )
+  while( i < stressSize )
   {
-    pos = random() % (relationSize-i);
+    pos = random() % (stressSize-i);
     val = intvec[pos];
     sprintf(record1.s, "%05d string record", val);
     record1.i = val;
@@ -330,8 +552,8 @@ void createRelationRandom()
 			}
 		}
 
-		int temp = intvec[relationSize-1-i];
-		intvec[relationSize-1-i] = intvec[pos];
+		int temp = intvec[stressSize-1-i];
+		intvec[stressSize-1-i] = intvec[pos];
 		intvec[pos] = temp;
 		i++;
   }
@@ -342,7 +564,6 @@ void createRelationRandom()
 // -----------------------------------------------------------------------------
 // indexTests
 // -----------------------------------------------------------------------------
-
 void indexTests()
 {
   intTests();
@@ -361,35 +582,21 @@ void indexTests()
 
 void intTests()
 {
-	std::cout << "Create a B+ Tree index on the integer field" << std::endl;
+  std::cout << "Create a B+ Tree index on the integer field" << std::endl;
+  BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple,i), INTEGER);
 
-	std::cout<<"0"<<std::endl;
-	BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple,i), INTEGER);
-
-	// // run some tests
-	// checkPassFail(intScan(&index,25,GT,40,LT), 14)
-	// checkPassFail(intScan(&index,20,GTE,35,LTE), 16)
-	// checkPassFail(intScan(&index,-3,GT,3,LT), 3)
-	// checkPassFail(intScan(&index,996,GT,1001,LT), 4)
-	// checkPassFail(intScan(&index,0,GT,1,LT), 0)
-	// checkPassFail(intScan(&index,300,GT,400,LT), 99)
-	// checkPassFail(intScan(&index,3000,GTE,4000,LT), 1000)
-	std::cout<<"1"<<std::endl;
+	// run some tests
 	checkPassFail(intScan(&index,25,GT,40,LT), 14)
-	std::cout<<"2"<<std::endl;
 	checkPassFail(intScan(&index,20,GTE,35,LTE), 16)
-	std::cout<<"3"<<std::endl;
 	checkPassFail(intScan(&index,-3,GT,3,LT), 3)
-	std::cout<<"4"<<std::endl;
 	checkPassFail(intScan(&index,996,GT,1001,LT), 4)
-	std::cout<<"5"<<std::endl;
 	checkPassFail(intScan(&index,0,GT,1,LT), 0)
-	std::cout<<"6"<<std::endl;
 	checkPassFail(intScan(&index,300,GT,400,LT), 99)
-	std::cout<<"7"<<std::endl;
 	checkPassFail(intScan(&index,3000,GTE,4000,LT), 1000)
-
 }
+
+
+
 
 int intScan(BTreeIndex * index, int lowVal, Operator lowOp, int highVal, Operator highOp)
 {
