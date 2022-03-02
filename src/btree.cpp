@@ -216,7 +216,7 @@ void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		}
 		deepCopy[m] = new RIDKeyPair<int>;
 		deepCopy[m]->set(rid,int_key);
-		int half = (leafOccupancy+1)/2;
+		int half = (leafOccupancy+1)/2; //the index of the key to be copied up
 
 		//update the original child
 		for(int c=0;c<leafOccupancy;c++){
