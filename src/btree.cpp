@@ -376,7 +376,7 @@ void BTreeIndex::insert_internal(int key,PageId new_child_pid){
 			this->rootPageNum = new_root_pid;
 
 			//update the metapage
-			PageId pid;
+			PageId pid=static_cast<PageId>(-1);
 			Page* meta_page;
 			bufMgr->readPage(file,pid,meta_page);
 			IndexMetaInfo* index_meta = reinterpret_cast<IndexMetaInfo*>(meta_page);
@@ -424,7 +424,7 @@ void BTreeIndex::startScan(const void* lowValParm,
     this -> highOp = highOpParm;
 
     // BadOpcodesException 
-    if ((this -> lowOp != GT && this -> lowOp != GTE) || (this -> highOp != LT && this -> highOp != LTE)) {
+    if (((lowOp != GT) && (lowOp != GTE)) || ((highOp != LT) &&  (highOp != LTE))) {
       throw BadOpcodesException();
     }
     // BadScanrangeException 
@@ -484,20 +484,20 @@ void BTreeIndex::startScan(const void* lowValParm,
     bool key_found = false;
 
     while (!key_found) {
-      if ((lowOp == GT && leaf -> keyArray[nextEntry] > lowValInt) || (lowOp == GTE && leaf -> keyArray[nextEntry] >= lowValInt)) {
+      if (((lowOp == GT) && (leaf -> keyArray[nextEntry] > lowValInt)) || ((lowOp == GTE) && (leaf -> keyArray[nextEntry] >= lowValInt))) {
         key_found = true;
       }
       nextEntry += 1;
       if (nextEntry == leafOccupancy) {
-        PageId prev = currentPageNum;
+        //PageId prev = currentPageNum;
         if ((int) leaf -> rightSibPageNo == -1) { // how to check whether a pageId is valid?
           throw NoSuchKeyFoundException();
         }
-        currentPageNum = leaf -> rightSibPageNo;
-        bufMgr -> unPinPage(file, prev, false); 
-        bufMgr -> readPage(file, currentPageNum, currentPageData); // read next page
-        leaf = reinterpret_cast <LeafNodeInt*> (currentPageData);
-        nextEntry = 0;
+        // currentPageNum = leaf -> rightSibPageNo;
+        // bufMgr -> unPinPage(file, prev, false); 
+        // bufMgr -> readPage(file, currentPageNum, currentPageData); // read next page
+        // leaf = reinterpret_cast <LeafNodeInt*> (currentPageData);
+        // nextEntry = 0;
       }
     }
 	// bufMgr -> unPinPage(file, currentPageNum, true); 
@@ -509,12 +509,12 @@ void BTreeIndex::startScan(const void* lowValParm,
 
 void BTreeIndex::scanNext(RecordId& outRid) 
 {
-if (!scanExecuting) { 
+	if (!scanExecuting) { 
 		throw ScanNotInitializedException(); 
 	}
 	bufMgr->readPage(file, currentPageNum, currentPageData);
 	LeafNodeInt* leaf = reinterpret_cast<LeafNodeInt*> (currentPageData);
-	if ((highOp == LTE && leaf->keyArray[nextEntry] > highValInt) || (highOp == LT && leaf->keyArray[nextEntry] >= highValInt)) {
+	if (((highOp == LTE) && (leaf->keyArray[nextEntry] > highValInt)) || ((highOp == LT) && (leaf->keyArray[nextEntry] >= highValInt))) {
 		throw IndexScanCompletedException();
 	} else {
 		outRid = leaf->ridArray[nextEntry];
@@ -539,7 +539,7 @@ if (!scanExecuting) {
 //
 void BTreeIndex::endScan() 
 {
-if (!scanExecuting) { 
+	if (!scanExecuting) { 
 		throw ScanNotInitializedException(); 
 	} 
 	scanExecuting = false;
