@@ -6,6 +6,10 @@
  */
 
 #include <vector>
+#include <cstdlib>	// group added
+#include <ctime>	// group added
+#include <set>		// group added
+
 #include "btree.h"
 #include "page.h"
 #include "filescan.h"
@@ -76,16 +80,26 @@ void test3();
 void errorTests();
 void deleteRelation();
 
-// added tests
+// added tests. group added
 void test4_stress_contiguous_ascending();
 void test5_stress_contiguous_descending();
 void test6_stress_contiguous_random();
 void test7_out_of_bound();
+void test_8_search_all_key();
+void test_9_reopen_tree();
+void test_10_construct_tree();
+void test_11_construct();
+
+
+
 
 void contiguous_createRelationForward();	// 4
 void contiguous_createRelationBackward();	// 5
 void contiguous_createRelationRandom();		// 6
 void test_out_of_bound();					//7
+
+
+
 
 int main(int argc, char **argv)
 {
@@ -119,8 +133,8 @@ int main(int argc, char **argv)
 		}
 
 	}
-	// new_file goes out of scope here, so file is automatically closed.
 
+	// new_file goes out of scope here, so file is automatically closed.
 	{
 		FileScan fscan(relationName, bufMgr);
 
@@ -150,6 +164,15 @@ int main(int argc, char **argv)
 	test2();
 	test3();
 	errorTests();
+// added tests. group added
+	test4_stress_contiguous_ascending();
+	test5_stress_contiguous_descending();
+	test6_stress_contiguous_random();
+	test7_out_of_bound();
+	test_8_search_all_key();
+	test_9_reopen_tree();
+	test_10_construct_tree();
+	test_11_construct();
 
 	delete bufMgr;
 
@@ -166,7 +189,6 @@ void test1()
 	indexTests();
 	deleteRelation();
 }
-
 void test2()
 {
 	// Create a relation with tuples valued 0 to relationSize in reverse order and perform index tests 
@@ -177,7 +199,6 @@ void test2()
 	indexTests();
 	deleteRelation();
 }
-
 void test3()
 {
 	// Create a relation with tuples valued 0 to relationSize in random order and perform index tests 
@@ -188,7 +209,6 @@ void test3()
 	indexTests();
 	deleteRelation();
 }
-
 // -----------------------------------------------------------------------------
 // extra Test(group added)
 // -----------------------------------------------------------------------------
@@ -199,7 +219,6 @@ void test4_stress_contiguous_ascending() {
   intTests();
   deleteRelation();
 }
-
 void test5_stress_contiguous_descending() {
 	std::cout << "---------------------" << std::endl;
 	std::cout << "test5_stress_contiguous_descending" << std::endl;
@@ -214,7 +233,6 @@ void test6_stress_contiguous_random() {
   intTests();
   deleteRelation();
 }
-
 void test7_out_of_bound() {
   std::cout << "---------------------" << std::endl;
   std::cout << "test7_out_of_bound" << std::endl;
@@ -222,12 +240,85 @@ void test7_out_of_bound() {
   test_out_of_bound();
   deleteRelation();
 }
+void test_8_search_all_key(){
+	// Additional Regular Test: e.g. search for key from -1000 to 6000 in the scenario of giving 5000 consecutive numbers from 0 to 4999
 
-// -----------------------------------------------------------------------------
-// user test helpers(group added)
-// -----------------------------------------------------------------------------
-void test_out_of_bound() 
+	// 1. giving 5000 consecutive numbers from 0 to 4999
+	createRelationForward();
+	
+	// 2. search from -1000 to 6000
+	std::cout << "Create a B+ Tree index on the integer field" << std::endl;
+  	
+	BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple,i), INTEGER);
+	checkPassFail(intScan(&index, -1000, GTE, 6000, LTE),5000);
+	deleteRelation();
+}
+void test_9_reopen_tree()
+// This criterion is linked to a Learning OutcomeAdditional B+ Tree Test: reopen an index on an existing one.
 {
+	try
+	{
+		File::remove(relationName);
+	}
+	catch(const FileNotFoundException &e)
+	{
+	}
+
+	// reopen an index on an existing one.
+	// 1. Check to see if the corresponding index file exists. 
+	BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple, i), INTEGER);
+
+	// 2. open the file again
+	BTreeIndex secondIndex(relationName, intIndexName, bufMgr, offsetof(tuple, i), INTEGER);
+}
+void test_10_construct_tree()
+// This criterion is linked to a Learning OutcomeAdditional B+ Tree Test: construct tree with relations of large size to force the non-leaf node split
+{
+	// 1. construct tree with relations of large size
+	createRelationForward();
+	
+	// 2. force the non-leaf node split
+	BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple, i), INTEGER);
+
+	int arrLeafSize = ( Page::SIZE - sizeof( PageId ) ) / ( sizeof( int ) + sizeof( RecordId ) );
+    int count= -1;
+	
+	// initialize all of record1.s to keep purify happy
+	memset(record1.s, ' ', sizeof(record1.s));
+	PageId new_page_number;
+	Page new_page = file1->allocatePage(new_page_number);
+
+	RecordId tempRID;
+
+    while(-count <= arrLeafSize){
+		// Insert a bunch of tuples into the relation.
+		sprintf(record1.s, "%05d string record", -count +1);
+		record1.i = count;
+		record1.d = (double)count;
+		std::string new_data(reinterpret_cast<char*>(&record1), sizeof(record1));
+
+		try
+		{
+			tempRID = new_page.insertRecord(new_data);
+			(&index)->insertEntry(&count,  tempRID);
+		}
+		catch(const InsufficientSpaceException &e)
+		{
+			file1->writePage(new_page_number, new_page);
+			new_page = file1->allocatePage(new_page_number);
+			continue;
+		}
+		count--;
+    }
+  	deleteRelation();
+}
+void test_11_construct()
+// This criterion is linked to a Learning OutcomeAdditional B+ Tree Test: Sparse relations with size of 3000, instead of relations with consecutive numbers.
+{
+	// Sparse relations with size of 3000, instead of relations with consecutive numbers.
+
+
+	std::vector<RecordId> ridVec;
 	// destroy any old copies of relation file
 	try
 	{
@@ -236,13 +327,71 @@ void test_out_of_bound()
 	catch(const FileNotFoundException &e)
 	{
 	}
+
+	file1 = new PageFile(relationName, true);
+
+	// initialize all of record1.s to keep purify happy
+	memset(record1.s, ' ', sizeof(record1.s));
+	PageId new_page_number;
+	Page new_page = file1->allocatePage(new_page_number);
+
+	BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple, i), INTEGER);
+
+	srand((unsigned int) time(NULL));
+    std::set<int> sample;
+    int count=0;
+	RecordId tempRID;
+
+    while(count<3000){
+        int i = rand();			//looking for new key
+
+        if(!sample.count(i)){
+
+			// Insert a bunch of tuples into the relation.
+			sprintf(record1.s, "%05d string record", i);
+			record1.i = i;
+			record1.d = (double)i;
+			std::string new_data(reinterpret_cast<char*>(&record1), sizeof(record1));
+
+			try
+			{
+				tempRID = new_page.insertRecord(new_data);
+				(&index)->insertEntry(&i,  tempRID);
+			
+			}
+			catch(const InsufficientSpaceException &e)
+			{
+				file1->writePage(new_page_number, new_page);
+				new_page = file1->allocatePage(new_page_number);
+				continue;
+			}
+			
+			sample.insert(i);
+			count++;
+		}
+
+    }
+	deleteRelation();
+	
+}
+
+// -----------------------------------------------------------------------------
+// user test helpers(group added)
+// -----------------------------------------------------------------------------
+void test_out_of_bound() // destroy any old copies of relation file
+{
+	try
+	{
+		File::remove(relationName);
+	}
+	catch(const FileNotFoundException &e)
+	{
+	}
 	std::cout << "Create a B+ Tree index on the integer field" << std::endl;
-	BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple, i),
-					INTEGER);
+	BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple, i), INTEGER);
 
 	checkPassFail(intScan(&index, 3000, GTE, 6000, LT), 2000);
 	checkPassFail(intScan(&index, 4999, GTE, 5010, LT), 1);
-
 	checkPassFail(intScan(&index, 5500, GTE, 6000, LT), 0);
 	checkPassFail(intScan(&index, 4999, GT, 6000, LT), 0);
 	checkPassFail(intScan(&index, -3000, GT, 0, LT), 0);
@@ -420,32 +569,32 @@ void createRelationForward()
   file1 = new PageFile(relationName, true);
 
   // initialize all of record1.s to keep purify happy
-  memset(record1.s, ' ', sizeof(record1.s));
+	memset(record1.s, ' ', sizeof(record1.s));
 	PageId new_page_number;
-  Page new_page = file1->allocatePage(new_page_number);
+	Page new_page = file1->allocatePage(new_page_number);
 
   // Insert a bunch of tuples into the relation.
-  for(int i = 0; i < relationSize; i++ )
+  	for(int i = 0; i < relationSize; i++ )
 	{
-    sprintf(record1.s, "%05d string record", i);
-    record1.i = i;
-    record1.d = (double)i;
-    std::string new_data(reinterpret_cast<char*>(&record1), sizeof(record1));
+		sprintf(record1.s, "%05d string record", i);
+		record1.i = i;
+		record1.d = (double)i;
+		std::string new_data(reinterpret_cast<char*>(&record1), sizeof(record1));
 
 		while(1)
 		{
 			try
 			{
-    		new_page.insertRecord(new_data);
+				new_page.insertRecord(new_data);
 				break;
 			}
 			catch(const InsufficientSpaceException &e)
 			{
 				file1->writePage(new_page_number, new_page);
-  			new_page = file1->allocatePage(new_page_number);
+				new_page = file1->allocatePage(new_page_number);
 			}
 		}
-  }
+	}
 
 	file1->writePage(new_page_number, new_page);
 }
